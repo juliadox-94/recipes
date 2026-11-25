@@ -144,6 +144,10 @@
       padding-left: 1.25rem;
       margin-top: 0.75rem;
     }
+    .ingredients-box ul.plain-lines {
+      list-style: none;
+      padding-left: 0;
+    }
     .ingredients-box li, .instructions-box li { margin-bottom: 0.5rem; }
     .source-link {
       display: inline-block;
@@ -183,44 +187,99 @@
   </div>
 
   <script>
-    // PASTE YOUR DEPLOYED GOOGLE APPS SCRIPT WEB APP URL BELOW:
     var API_URL = 'https://script.google.com/macros/s/AKfycbypo_sNIjS93Rw1rWb6FrDJnLn1p7dpu0cZ1rT65VPe9uvgQ6gsF9oBYTNp1cXGP8qB/exec';
 
     var UI_TEXT = {
       Polish: {
+        htmlLang: 'pl',
         appTitle: 'Moje Przepisy',
+        loading: 'Ładowanie przepisów...',
+        loadError: 'Błąd podczas ładowania przepisów. Sprawdź adres API_URL.',
         search: 'Szukaj przepisu lub składnika...',
         allCats: 'Wszystkie kategorie',
         back: '← Wróć do listy',
         ingredients: 'Składniki',
         instructions: 'Przygotowanie',
+        time: 'Czas',
         servings: 'Porcje',
+        nutrition: 'Wartości odżywcze',
         source: 'Oryginalny przepis ↗',
         empty: 'Brak przepisów pasujących do wyszukiwania.'
       },
       English: {
+        htmlLang: 'en',
         appTitle: 'My Recipes',
+        loading: 'Loading recipes...',
+        loadError: 'Error loading recipes. Check your API_URL.',
         search: 'Search recipes or ingredients...',
         allCats: 'All Categories',
         back: '← Back to recipes',
         ingredients: 'Ingredients',
         instructions: 'Instructions',
+        time: 'Time',
         servings: 'Servings',
+        nutrition: 'Nutrition',
         source: 'Original recipe source ↗',
         empty: 'No recipes match your search.'
       },
       French: {
+        htmlLang: 'fr',
         appTitle: 'Mes Recettes',
+        loading: 'Chargement des recettes...',
+        loadError: 'Erreur lors du chargement des recettes. Vérifiez API_URL.',
         search: 'Rechercher une recette ou un ingrédient...',
         allCats: 'Toutes les catégories',
         back: '← Retour aux recettes',
         ingredients: 'Ingrédients',
         instructions: 'Préparation',
+        time: 'Temps',
         servings: 'Portions',
+        nutrition: 'Valeurs nutritionnelles',
         source: 'Source originale de la recette ↗',
         empty: 'Aucune recette ne correspond à votre recherche.'
       }
     };
+
+    var CATEGORY_LABELS = {
+      'soup': { Polish: 'Zupa', English: 'Soup', French: 'Soupe' },
+      'soups': { Polish: 'Zupy', English: 'Soups', French: 'Soupes' },
+      'ramen': { Polish: 'Ramen', English: 'Ramen', French: 'Ramen' },
+      'main': { Polish: 'Danie główne', English: 'Main', French: 'Plat principal' },
+      'main course': { Polish: 'Danie główne', English: 'Main Course', French: 'Plat principal' },
+      'main dish': { Polish: 'Danie główne', English: 'Main Dish', French: 'Plat principal' },
+      'appetizer': { Polish: 'Przystawka', English: 'Appetizer', French: 'Entrée' },
+      'starter': { Polish: 'Przystawka', English: 'Starter', French: 'Entrée' },
+      'salad': { Polish: 'Sałatka', English: 'Salad', French: 'Salade' },
+      'dessert': { Polish: 'Deser', English: 'Dessert', French: 'Dessert' },
+      'breakfast': { Polish: 'Śniadanie', English: 'Breakfast', French: 'Petit-déjeuner' },
+      'snack': { Polish: 'Przekąska', English: 'Snack', French: 'En-cas' },
+      'drink': { Polish: 'Napój', English: 'Drink', French: 'Boisson' },
+      'beverage': { Polish: 'Napój', English: 'Beverage', French: 'Boisson' },
+      'side': { Polish: 'Dodatek', English: 'Side', French: 'Accompagnement' },
+      'side dish': { Polish: 'Dodatek', English: 'Side Dish', French: 'Accompagnement' },
+      'baking': { Polish: 'Wypieki', English: 'Baking', French: 'Pâtisserie' }
+    };
+
+    function getCategoryLabel(rawCat, lang) {
+      if (!rawCat) return '';
+      var key = String(rawCat).trim().toLowerCase();
+      if (CATEGORY_LABELS[key] && CATEGORY_LABELS[key][lang]) {
+        return CATEGORY_LABELS[key][lang];
+      }
+      return rawCat;
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatInlineFormatting(str) {
+      return escapeHtml(str).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    }
 
     var allRecipes = [];
     var currentLang = localStorage.getItem('recipeLang') || 'Polish';
@@ -241,6 +300,7 @@
         });
         btn.classList.add('active');
         updateUILabels();
+        populateCategories();
         if (selectedRecipeId) {
           renderDetail(selectedRecipeId);
         } else {
@@ -250,9 +310,14 @@
     });
 
     function updateUILabels() {
-      var t = UI_TEXT[currentLang];
+      var t = UI_TEXT[currentLang] || UI_TEXT.Polish;
+      document.documentElement.lang = t.htmlLang;
       document.getElementById('app-title').textContent = t.appTitle;
       document.getElementById('search').placeholder = t.search;
+      var statusEl = document.getElementById('status-msg');
+      if (statusEl && !allRecipes.length) {
+        statusEl.textContent = t.loading;
+      }
       var catSelect = document.getElementById('category-filter');
       if (catSelect.options.length > 0) {
         catSelect.options.item(0).textContent = t.allCats;
@@ -269,19 +334,32 @@
           renderList();
         })
         .catch(function() {
-          document.getElementById('status-msg').textContent = 'Error loading recipes. Check your API_URL.';
+          var t = UI_TEXT[currentLang] || UI_TEXT.Polish;
+          var statusEl = document.getElementById('status-msg');
+          if (statusEl) statusEl.textContent = t.loadError;
         });
     }
 
     function populateCategories() {
       var select = document.getElementById('category-filter');
+      var previousValue = select.value;
+      var t = UI_TEXT[currentLang] || UI_TEXT.Polish;
       var categories = Array.from(new Set(allRecipes.map(function(r) { return r.category; }).filter(Boolean)));
+
+      select.innerHTML = '';
+      var defaultOpt = document.createElement('option');
+      defaultOpt.value = '';
+      defaultOpt.textContent = t.allCats;
+      select.appendChild(defaultOpt);
+
       categories.forEach(function(cat) {
         var opt = document.createElement('option');
         opt.value = cat;
-        opt.textContent = cat;
+        opt.textContent = getCategoryLabel(cat, currentLang);
         select.appendChild(opt);
       });
+
+      select.value = previousValue;
     }
 
     function renderList() {
@@ -292,6 +370,7 @@
       var query = document.getElementById('search').value.toLowerCase();
       var cat = document.getElementById('category-filter').value;
       var grid = document.getElementById('recipes-grid');
+      var t = UI_TEXT[currentLang] || UI_TEXT.Polish;
 
       var filtered = allRecipes.filter(function(r) {
         var content = r.languages[currentLang] || {};
@@ -303,20 +382,21 @@
       });
 
       if (!filtered.length) {
-        grid.innerHTML = '<div class="status">' + UI_TEXT[currentLang].empty + '</div>';
+        grid.innerHTML = '<div class="status">' + escapeHtml(t.empty) + '</div>';
         return;
       }
 
       grid.innerHTML = filtered.map(function(r) {
-        var c = r.languages[currentLang];
+        var c = r.languages[currentLang] || {};
+        var catLabel = getCategoryLabel(r.category, currentLang);
         return '<div class="card" onclick="renderDetail(' + r.id + ')">' +
           '<div>' +
-            (r.category ? '<span class="badge">' + r.category + '</span>' : '') +
-            '<h2>' + c.title + '</h2>' +
+            (catLabel ? '<span class="badge">' + escapeHtml(catLabel) + '</span>' : '') +
+            '<h2>' + formatInlineFormatting(c.title || '') + '</h2>' +
           '</div>' +
           '<div>' +
-            '<div class="meta">⏱ ' + (r.time || '-') + ' &nbsp;•&nbsp; 🍽 ' + (r.servings || '-') + '</div>' +
-            (r.nutrition ? '<div class="nutrition-pill">📊 ' + r.nutrition + '</div>' : '') +
+            '<div class="meta">⏱ ' + escapeHtml(t.time) + ': ' + escapeHtml(r.time || '-') + ' &nbsp;•&nbsp; 🍽 ' + escapeHtml(t.servings) + ': ' + escapeHtml(r.servings || '-') + '</div>' +
+            (r.nutrition ? '<div class="nutrition-pill">📊 ' + escapeHtml(t.nutrition) + ': ' + escapeHtml(r.nutrition) + '</div>' : '') +
           '</div>' +
         '</div>';
       }).join('');
@@ -327,44 +407,54 @@
       var r = allRecipes.find(function(item) { return item.id === id; });
       if (!r) return;
 
-      var c = r.languages[currentLang];
-      var t = UI_TEXT[currentLang];
+      var c = r.languages[currentLang] || {};
+      var t = UI_TEXT[currentLang] || UI_TEXT.Polish;
+      var catLabel = getCategoryLabel(r.category, currentLang);
 
-      var ingList = (c.ingredients || '')
-        .split('\n')
-        .map(function(line) { return line.replace(/^[-•*]\s*/, '').trim(); })
-        .filter(Boolean)
-        .map(function(line) { return '<li>' + line + '</li>'; })
+      var rawIngLines = (c.ingredients || '')
+        .split(/\r?\n/)
+        .map(function(line) { return line.trim(); })
+        .filter(Boolean);
+
+      var hasExplicitBullets = rawIngLines.some(function(line) {
+        return /^[-•*]\s+/.test(line);
+      });
+
+      var ingList = rawIngLines
+        .map(function(line) {
+          var clean = line.replace(/^[-•*]\s+/, '').trim();
+          return '<li>' + formatInlineFormatting(clean) + '</li>';
+        })
         .join('');
 
       var stepList = (c.instructions || '')
-        .split('\n')
+        .split(/\r?\n/)
         .map(function(line) { return line.replace(/^\d+[\.\)]\s*/, '').trim(); })
         .filter(Boolean)
-        .map(function(line) { return '<li>' + line + '</li>'; })
+        .map(function(line) { return '<li>' + formatInlineFormatting(line) + '</li>'; })
         .join('');
 
       document.getElementById('list-view').style.display = 'none';
       var detail = document.getElementById('detail-view');
       detail.style.display = 'block';
 
-      detail.innerHTML = '<button class="back-btn" onclick="renderList()">' + t.back + '</button>' +
+      detail.innerHTML = '<button class="back-btn" onclick="renderList()">' + escapeHtml(t.back) + '</button>' +
         '<div class="detail">' +
-          (r.category ? '<span class="badge">' + r.category + '</span>' : '') +
-          '<h1>' + c.title + '</h1>' +
-          '<div class="meta">⏱ ' + (r.time || '-') + ' &nbsp;•&nbsp; 🍽 ' + t.servings + ': ' + (r.servings || '-') + '</div>' +
-          (r.nutrition ? '<div class="nutrition-pill" style="display:inline-block;margin-top:0.75rem;">📊 ' + r.nutrition + '</div>' : '') +
+          (catLabel ? '<span class="badge">' + escapeHtml(catLabel) + '</span>' : '') +
+          '<h1>' + formatInlineFormatting(c.title || '') + '</h1>' +
+          '<div class="meta">⏱ ' + escapeHtml(t.time) + ': ' + escapeHtml(r.time || '-') + ' &nbsp;•&nbsp; 🍽 ' + escapeHtml(t.servings) + ': ' + escapeHtml(r.servings || '-') + '</div>' +
+          (r.nutrition ? '<div class="nutrition-pill" style="display:inline-block;margin-top:0.75rem;">📊 ' + escapeHtml(t.nutrition) + ': ' + escapeHtml(r.nutrition) + '</div>' : '') +
           '<div class="detail-grid">' +
             '<div class="ingredients-box">' +
-              '<h3>' + t.ingredients + '</h3>' +
-              '<ul>' + ingList + '</ul>' +
+              '<h3>' + escapeHtml(t.ingredients) + '</h3>' +
+              '<ul class="' + (hasExplicitBullets ? '' : 'plain-lines') + '">' + ingList + '</ul>' +
             '</div>' +
             '<div class="instructions-box">' +
-              '<h3>' + t.instructions + '</h3>' +
+              '<h3>' + escapeHtml(t.instructions) + '</h3>' +
               '<ol>' + stepList + '</ol>' +
             '</div>' +
           '</div>' +
-          (r.sourceUrl ? '<a class="source-link" href="' + r.sourceUrl + '" target="_blank" rel="noopener">' + t.source + '</a>' : '') +
+          (r.sourceUrl ? '<a class="source-link" href="' + escapeHtml(r.sourceUrl) + '" target="_blank" rel="noopener">' + escapeHtml(t.source) + '</a>' : '') +
         '</div>';
       window.scrollTo(0, 0);
     }
